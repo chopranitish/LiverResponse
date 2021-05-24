@@ -87,7 +87,6 @@ if write_records:
                      dtypes=('float32', 'float32', 'int8', 'int8', 'float32'),
                      out_keys=('primary_image', 'secondary_image', 'primary_mask', 'secondary_mask', 'primary_dose')),
         Processors.GetLiverResponse(keys = ('primary_mask_nifti','secondary_mask_nifti')),
-
         Processors.DeleteKeys(keys_to_delete=('primary_image_nifti', 'secondary_image_nifti', 'primary_mask_nifti',
                                    'secondary_mask_nifti', 'primary_dose_nifti', 'secondary_image', 'secondary_mask')),
 
