@@ -10,39 +10,68 @@ All of the top part will be in PreProcessingTools
 """
 First, identify the rois present in the scan
 """
-dicom_path = r'H:\Deeplearning_Recurrence_Work\Dicom_Exports'
-identify_rois = False
+associations = {'liver_bma_program_4': 'liver'}
+contour_names = ['liver_segment_{}_bmaprogram3'.format(i) for i in range(1, 5)]
+contour_names += ['liver_segment_5-8_bmaprogram3', 'liver']
+dicom_path = r'C:\Morfeus_Lab\Liver'
+identify_rois = True
 if identify_rois:
     from PreProcessingTools.Dicom_Tools.Identify_Rois import identify_rois_in_path
     reader, rois = identify_rois_in_path(path=dicom_path)
-    Contour_Names = ['liver']
-    associations = {'liver_bma_program_4': 'liver'}
-    reader.set_contour_names_and_associations(Contour_Names=Contour_Names, associations=associations)
+    reader.set_contour_names_and_associations(Contour_Names=contour_names, associations=associations)
     reader.which_indexes_lack_all_rois()  # Check and see if there are indexes that lack the rois
 
 """
 Next, write the images and masks to nifti files
 """
-Contour_Names = ['liver']
-associations = {'liver_bma_program_4': 'liver'}
-"""
-Check what indexes don't have all of the rois
-"""
-write_nifti_files = False
-nifti_path = r'H:\Nifti_exports'
-description = 'Test'
-excel_path = os.path.join('.', 'Patient_Distribution.xlsx')
-if write_nifti_files:
-    from PreProcessingTools.Dicom_Tools.Dicom_to_Nifti import dicom_to_nifi
-    dicom_to_nifi(nifti_path=nifti_path, dicom_path=dicom_path, Contour_Names=Contour_Names, associations=associations,
-                  excel_file=os.path.join('.', 'Patient_Distribution.xlsx'), description=description)
+
+write_nifti = True
+if write_nifti:
+    '''
+    This will print if any rois are missing at certain locations
+    '''
+    check_rois = True
+    from Base_Deeplearning_Code.Dicom_RT_and_Images_to_Mask.src.DicomRTTool import DicomReaderWriter, plot_scroll_Image
+    import os
+    import numpy as np
+
+
+    # contour_names += ['liver_segment_{}_bmaprogram4'.format(i) for i in range(1, 5)]
+    # contour_names += ['liver_segment_5-8_bmaprogram4']
+    for MRN in os.listdir(dicom_path):
+        patient_path = os.path.join(dicom_path, MRN)
+        primary_reader = DicomReaderWriter(description='Liver_Outcome_Primary', arg_max=False, get_dose_output=True)
+        primary_reader.set_contour_names_and_associations(Contour_Names=contour_names, associations=associations)
+        secondary_reader = DicomReaderWriter(description='Liver_Outcome_Followup', arg_max=False)
+        secondary_reader.set_contour_names_and_associations(Contour_Names=contour_names, associations=associations)
+        primary_reader.walk_through_folders(os.path.join(patient_path, 'Primary'))
+        secondary_reader.walk_through_folders(os.path.join(patient_path, 'Secondary'))
+
+        primary_reader.write_parallel(out_path=dicom_path, excel_file=os.path.join(dicom_path, 'MRN_Path_To_Iteration.xlsx'))
+        secondary_reader.write_parallel(out_path=dicom_path, excel_file=os.path.join(dicom_path, 'MRN_Path_To_Iteration.xlsx'),thread_count=5)
+
+resample_dose = False
+if resample_dose:
+    import SimpleITK as sitk
+    import os
+    path = r'C:\Morfeus_Lab\Liver'
+    dose_files = [i for i in os.listdir(path) if i.startswith('Overall_dose')]
+    for file in dose_files:
+        print(file)
+        primary_file = file.replace('dose', 'Data')
+        dose_handle = sitk.ReadImage(os.path.join(path, file))
+        primary_handle = sitk.ReadImage(os.path.join(path, primary_file))
+        if dose_handle.GetSize() != primary_handle.GetSize():
+            # print('These are not the same for {}...'.format(MRN))
+            dose_handle = sitk.Resample(dose_handle, primary_handle, sitk.AffineTransform(3), sitk.sitkLinear,
+                                        0, dose_handle.GetPixelID())
+            sitk.WriteImage(dose_handle, os.path.join(path, file))
 
 '''
 Ensure that all contours are within the liver contour, as sometimes they're drawn to extend past it
 '''
 
-Contour_names = ['liver']
-write_records = True
+write_records = False
 if write_records:
     from Base_Deeplearning_Code.Image_Processors_Module.src.Processors import MakeTFRecordProcessors as Processors
     from Base_Deeplearning_Code.Image_Processors_Module.src.Processors import TFRecordWriter as Writer
