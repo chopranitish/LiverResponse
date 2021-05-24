@@ -14,7 +14,7 @@ associations = {'liver_bma_program_4': 'liver'}
 contour_names = ['liver_segment_{}_bmaprogram3'.format(i) for i in range(1, 5)]
 contour_names += ['liver_segment_5-8_bmaprogram3', 'liver']
 dicom_path = r'C:\Morfeus_Lab\Liver'
-identify_rois = True
+identify_rois = False
 if identify_rois:
     from PreProcessingTools.Dicom_Tools.Identify_Rois import identify_rois_in_path
     reader, rois = identify_rois_in_path(path=dicom_path)
@@ -46,7 +46,6 @@ if write_nifti:
         secondary_reader.set_contour_names_and_associations(Contour_Names=contour_names, associations=associations)
         primary_reader.walk_through_folders(os.path.join(patient_path, 'Primary'))
         secondary_reader.walk_through_folders(os.path.join(patient_path, 'Secondary'))
-
         primary_reader.write_parallel(out_path=dicom_path, excel_file=os.path.join(dicom_path, 'MRN_Path_To_Iteration.xlsx'))
         secondary_reader.write_parallel(out_path=dicom_path, excel_file=os.path.join(dicom_path, 'MRN_Path_To_Iteration.xlsx'),thread_count=5)
 
@@ -76,25 +75,30 @@ if write_records:
     from Base_Deeplearning_Code.Image_Processors_Module.src.Processors import MakeTFRecordProcessors as Processors
     from Base_Deeplearning_Code.Image_Processors_Module.src.Processors import TFRecordWriter as Writer
     import os
-    image_path = os.path.join(nifti_path, 'Overall_Data_Test_0.nii.gz')
-    annotation_path = os.path.join(nifti_path, 'Overall_mask_Test_y0.nii.gz')
     processors = [
-        Processors.LoadNifti(nifti_path_keys=('image_path', 'annotation_path'),
-                             # Loads a file path as a SimpleITK Image
-                             out_keys=('image_handle', 'annotation_handle')),
-        Processors.SimpleITKImageToArray(nifti_keys=('image_handle', 'annotation_handle'),  # Converts an Image to array
-                                         out_keys=('image_array', 'annotation_array'), dtypes=('float32', 'int8'))
-    ]
-    normalizing_processors = [
-        Processors.Threshold_Images(image_keys=('image_array',), lower_bound=-100, upper_bound=200),
-        Processors.Box_Images(image_keys=('image_array',), annotation_key='annotation_array', wanted_vals_for_bbox=(1,),
-                              bounding_box_expansion=(0, 0, 0), power_val_z=1, power_val_r=512,
-                              power_val_c=512, min_images=None, min_rows=None, min_cols=None)
-    ]
-    distributing_processors = [
-        Processors.DistributeInTo2DSlices(image_keys=('image_array', 'annotation_array'))
-    ]
+        Processors.LoadNifti(nifti_path_keys=('primary_image_path', 'secondary_image_path',
+                                              'primary_mask_path', 'secondary_mask_path', 'primary_dose_path'),
+                             out_keys=('primary_image_nifti', 'secondary_image_nifti', 'primary_mask_nifti',
+                                       'secondary_mask_nifti', 'primary_dose_nifti')),
+        # ResampleHandles(reference_keys=('primary_image_nifti',), resample_interpolators=('Linear',),
+        #                 moving_keys=('primary_dose_nifti',)),
+        Processors.NiftiToArray(nifti_keys=('primary_image_nifti', 'secondary_image_nifti', 'primary_mask_nifti',
+                                 'secondary_mask_nifti', 'primary_dose_nifti'),
+                     dtypes=('float32', 'float32', 'int8', 'int8', 'float32'),
+                     out_keys=('primary_image', 'secondary_image', 'primary_mask', 'secondary_mask', 'primary_dose')),
+        Processors.GetLiverResponse(keys = ('primary_mask_nifti','secondary_mask_nifti')),
+        Processors.DeleteKeys(keys_to_delete=('primary_image_nifti', 'secondary_image_nifti', 'primary_mask_nifti',
+                                   'secondary_mask_nifti', 'primary_dose_nifti', 'secondary_image', 'secondary_mask')),
 
+        Processors.Resampler(resample_keys=('primary_image', 'primary_dose', 'primary_mask'),
+                  desired_output_spacing=(1., 1., 5.),
+                  resample_interpolators=('Linear', 'Linear', 'Nearest')),
+
+        Processors.Threshold_Images(image_keys=('primary_image',), lower_bound=-200, upper_bound=200, divide=False),
+        Processors.Box_Images(image_keys=('primary_image', 'primary_dose'), annotation_key='primary_mask', min_images=100,
+                   min_rows=400, min_cols=400, wanted_vals_for_bbox=[1,2,3,4,5]),
+
+    ]
 
     record_path = r'H:\TF_Record_Exports'
     record_writer = Writer.RecordWriter(out_path=record_path, file_name_key='out_name', rewrite=True)
@@ -104,11 +108,11 @@ if write_records:
         index = file.split('_')[-1].split('.nii')[0]
         image_path = os.path.join(nifti_path, file)
         annotation_path = os.path.join(nifti_path, 'Overall_mask_Test_y{}.nii.gz'.format(index))
-        temp_dict = {'image_path': image_path, 'annotation_path': annotation_path,
+        temp_dict = {'primary_image_path': image_path, 'annotation_path': annotation_path, 'dose_path': dose_path,
                      'out_name': '{}.tfrecord'.format(index)}
         file_dictionary_list.append(temp_dict)
     Writer.parallel_record_writer(dictionary_list=file_dictionary_list, max_records=1,
-                                  image_processors=processors + normalizing_processors + distributing_processors,
+                                  image_processors=processors,
                                   recordwriter=record_writer, verbose=True, debug=True)
     # from Local_Recurrence_Work.Outcome_Analysis.PreProcessingTools.Nifti_to_tfrecords import nifti_to_records, os
     # nifti_to_records(nifti_path=os.path.join(nifti_export_path, 'Train'))
